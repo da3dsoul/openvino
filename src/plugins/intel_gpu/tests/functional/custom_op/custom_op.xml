@@ -25,3 +25,19 @@
     <CompilerOptions options="-cl-mad-enable"/>
     <WorkSizes global="B*F*Y*X,1,1"/>
 </CustomLayer>
+
+<CustomLayer name="CustomOpTwoIn" type="SimpleGPU" version="1">
+    <Kernel entry="custom_kernel_two_inputs">
+        <Source filename="custom_op_two_inputs.cl"/>
+    </Kernel>
+    <Buffers>
+        <!-- Both input ports declare a concrete format, so CreateCustomOp inserts a
+             pre-reorder for each. When both ports are fed by the same producer, the two
+             reorder primitives must still get distinct ids. -->
+        <Tensor arg-index="0" type="input" port-index="0" format="BFYX"/>
+        <Tensor arg-index="1" type="input" port-index="1" format="BFYX"/>
+        <Tensor arg-index="2" type="output" port-index="0" format="BFYX"/>
+    </Buffers>
+    <CompilerOptions options="-cl-mad-enable"/>
+    <WorkSizes global="B*F*Y*X,1,1"/>
+</CustomLayer>

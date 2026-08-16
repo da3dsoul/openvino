@@ -142,7 +142,16 @@ void CreateCustomOp(ProgramBuilder& p, const std::shared_ptr<ov::Node>& op, Cust
             if (param.portIndex < static_cast<int>(inputs.size()) && reordered_inputs[param.portIndex].pid.empty()) {
                 // todo: add support for multiple reorders of the same input? (read as bfyx for one arg and yxfb for another)
                 if (param.format != cldnn::format::any) {
-                    auto reorderPrimName = inputs[param.portIndex].pid + "_" + op->get_friendly_name() + ProgramBuilder::m_preCustomLayerTag;
+                    // Include the port index in the reorder primitive's name -- without it,
+                    // two different input ports of the SAME custom op that happen to read the
+                    // same underlying producer tensor (e.g. an op called with the same value
+                    // for two logically-different arguments) generate identical reorder
+                    // primitive ids, and adding the second one fails with "Different primitive
+                    // with id '...' exists already" (topology::add_primitive). Matches the
+                    // pre-existing TODO right above this block ("add support for multiple
+                    // reorders of the same input... for one arg and yxfb for another").
+                    auto reorderPrimName = inputs[param.portIndex].pid + "_" + op->get_friendly_name() +
+                                            "_" + std::to_string(param.portIndex) + ProgramBuilder::m_preCustomLayerTag;
                     auto preprocessPrim = cldnn::reorder(
                         reorderPrimName,
                         inputs[param.portIndex],
