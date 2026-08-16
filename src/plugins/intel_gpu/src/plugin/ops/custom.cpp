@@ -192,8 +192,21 @@ void CreateCustomOp(ProgramBuilder& p, const std::shared_ptr<ov::Node>& op, Cust
     OPENVINO_ASSERT(outputFormats.size() == op->get_output_size(), "The number of outputFormats should be same as op->get_output_size().");
 
     std::vector<cldnn::layout> outputLayouts(op->get_output_size());
+    // format="ANY" on an output <Tensor> means "this kernel already writes the graph's
+    // default layout, so don't insert a conversion after me". Honour that intent, but do
+    // NOT propagate format::any into the output layout itself: cldnn::layout's
+    // tensor constructor stores a format::any layout's sizes in raw internal tensor order
+    // (b,f,x,y,z,...) instead of the format's logical order (b,f,y,x), and with the full
+    // internal rank rather than the op's. That silently corrupts both the WorkSizes
+    // B/F/Y/X resolution in update_work_group_size() and the shape every downstream node
+    // sees -- producing a wrong dispatch and mismatched consumer shapes with no error.
+    std::vector<bool> skipOutputReorder(op->get_output_size(), false);
     for (size_t i = 0; i < op->get_output_size(); i++) {
         auto dims = op->get_output_partial_shape(i);
+        if (outputFormats[i] == cldnn::format::any) {
+            skipOutputReorder[i] = true;
+            outputFormats[i] = cldnn::format::get_default_format(dims.size());
+        }
 
         constexpr size_t kDynamic = std::numeric_limits<size_t>::max();
         size_t N = (dims.size() > 0) ? dims[0].is_dynamic() ? kDynamic : dims[0].get_length() : 1;
@@ -261,7 +274,7 @@ void CreateCustomOp(ProgramBuilder& p, const std::shared_ptr<ov::Node>& op, Cust
     p.add_primitive(*op, customPrim);
 
     for (size_t i = 0; i < outputLayouts.size(); i++) {
-        if (outputLayouts[i].format != cldnn::format::any) {
+        if (!skipOutputReorder[i]) {
             auto default_format = cldnn::format::get_default_format(op->get_output_partial_shape(i).size());
             if (outputLayouts.size() > 1) {
                 OPENVINO_ASSERT(default_format == outputLayouts[i].format,
