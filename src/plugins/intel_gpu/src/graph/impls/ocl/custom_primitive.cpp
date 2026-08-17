@@ -69,6 +69,23 @@ struct custom_gpu_primitive_impl : typed_primitive_impl<custom_gpu_primitive> {
     using parent = typed_primitive_impl<custom_gpu_primitive>;
     using parent::parent;
 
+    // custom_gpu_primitive_impl enqueues a real OpenCL kernel on the GPU (see
+    // execute_impl below), but it derives from the generic typed_primitive_impl rather
+    // than from typed_primitive_impl_ocl -- which is the class that overrides is_cpu()
+    // to return false. Without this override it therefore inherits
+    // primitive_impl::is_cpu()'s `return true` default, and every CustomLayer op in the
+    // GPU plugin gets treated as a CPU implementation by the allocator:
+    //   * its own output is allocated as lockable (usm_host) memory, and
+    //   * every producer feeding it is dragged into usm_host as well, via
+    //     has_any_cpu_user_not_shape_of() -> requires_lockable_input(), a recursion that
+    //     walks through can_be_optimized() nodes rather than stopping at them.
+    // The result is GPU kernels reading and writing host memory across PCIe. Measured on
+    // a real RIFE/DRBA graph (Arc Pro B70): a flat ~84 MB/s write bandwidth on the
+    // affected buffers, and a 3862ms -> 85ms drop in total inference time once fixed.
+    // requires_lockable_input() defaults to is_cpu(), so this single override covers
+    // both the op's own output and its producers.
+    bool is_cpu() const override { return false; }
+
     DECLARE_OBJECT_TYPE_SERIALIZATION(cldnn::ocl::custom_gpu_primitive_impl)
 
     std::shared_ptr<kernel_selector::cl_kernel_data> cl_kernel;
